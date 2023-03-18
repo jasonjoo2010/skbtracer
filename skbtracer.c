@@ -307,7 +307,7 @@ do_trace_skb(struct event_t *event, void *ctx, struct sk_buff *skb, void *netdev
        	    proto_icmp_echo_request = ICMP_ECHO;
        	    proto_icmp_echo_reply   = ICMP_ECHOREPLY;
         }
-        
+
     } else if (event->ip_version == 6) {
         // Assume no option header --> fixed size header
         struct ipv6hdr* ipv6hdr = (struct ipv6hdr*)l3_header_address;
@@ -384,9 +384,9 @@ do_trace_skb(struct event_t *event, void *ctx, struct sk_buff *skb, void *netdev
     if (event->ip_version == 4)
         return -1;
     
-    if ((__BCC_ipaddr != event->saddr[0] || __BCC_ipaddr1 != event->saddr[1]) && 
-        (__BCC_ipaddr != event->daddr[0] || __BCC_ipaddr1 != event->daddr[1]))
-        return -1;
+    // if ((__BCC_ipaddr != event->saddr[0] || __BCC_ipaddr1 != event->saddr[1]) && 
+    //     (__BCC_ipaddr != event->daddr[0] || __BCC_ipaddr1 != event->daddr[1]))
+    //     return -1;
 #else
     // ipv4
     if (event->ip_version == 6)
