@@ -18,6 +18,7 @@ __BCC_ARGS_DEFINE__
 #else
 #define __BCC_pid        0
 #define __BCC_ipaddr     0
+#define __BCC_ipaddr1     0
 #define __BCC_port       0
 #define __BCC_icmpid     0
 #define __BCC_dropstack  0
@@ -375,15 +376,25 @@ do_trace_skb(struct event_t *event, void *ctx, struct sk_buff *skb, void *netdev
 #endif
 
     /*
-     * skb filter
+     * addr filter
      */
 #if __BCC_ipaddr
-   if (event->ip_version == 4) {
-       if (__BCC_ipaddr != event->saddr[0] && __BCC_ipaddr != event->daddr[0])
-           return -1;
-   } else {
-       return -1;
-   }
+#if __BCC_ipaddr1
+    // ipv6
+    if (event->ip_version == 4)
+        return -1
+    
+    if ((__BCC_ipaddr != event->saddr[0] || __BCC_ipaddr1 != event->saddr[1]) && 
+        (__BCC_ipaddr != event->daddr[0] || __BCC_ipaddr1 != event->daddr[1]))
+        return -1;
+#else
+    // ipv4
+    if (event->ip_version == 6)
+        return -1;
+
+    if (__BCC_ipaddr != event->saddr[0] && __BCC_ipaddr != event->daddr[0])
+        return -1;
+#endif
 #endif
 
 #if __BCC_proto

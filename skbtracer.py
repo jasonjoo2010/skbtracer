@@ -90,13 +90,19 @@ ipproto["icmp"]="1"
 proto = 0 if args.proto == None else (0 if ipproto.get(args.proto) == None else ipproto[args.proto])
 #ipaddr=socket.htonl(struct.unpack("I",socket.inet_aton("0" if args.ipaddr == None else args.ipaddr))[0])
 #port=socket.htons(args.port)
-ipaddr=(struct.unpack("I",socket.inet_aton("0" if args.ipaddr == None else args.ipaddr))[0])
+ipaddr = (0, 0)
+if args.ipaddr != None:
+    if args.ipaddr.index(":") >= 0:
+        ipaddr = struct.unpack(">QQ", socket.inet_pton(socket.AF_INET6, args.ipaddr))
+    else:
+        ipaddr = struct.unpack("I", socket.inet_pton(socket.AF_INET, args.ipaddr))
 port=(args.port)
 icmpid=socket.htons(args.icmpid)
 
 bpf_def="#define __BCC_ARGS__\n"
 bpf_args="#define __BCC_pid (%d)\n" % (args.pid)
-bpf_args+="#define __BCC_ipaddr (0x%x)\n" % (ipaddr)
+bpf_args+="#define __BCC_ipaddr (0x%x)\n" % (ipaddr[0])
+bpf_args+="#define __BCC_ipaddr1 (0x%x)\n" % (ipaddr[1])
 bpf_args+="#define __BCC_port (%d)\n" % (port)
 bpf_args+="#define __BCC_netns (%d)\n" % (args.netns)
 bpf_args+="#define __BCC_proto (%s)\n" % (proto)
