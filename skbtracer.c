@@ -299,15 +299,16 @@ do_trace_skb(struct event_t *event, void *ctx, struct sk_buff *skb, void *netdev
 
         l4_offset_from_ip_header = iphdr.ihl * 4;
         event->l4_proto  = iphdr.protocol;
-        event->saddr[0] = iphdr.saddr;
-        event->daddr[0] = iphdr.daddr;
-	event->tot_len = ntohs(iphdr.tot_len);
+        event->saddr[0] = iphdr.saddr[0];
+        event->saddr[1] = iphdr.saddr[1];
+        event->daddr[0] = iphdr.daddr[0];
+        event->daddr[1] = iphdr.daddr[1];
+	    event->tot_len = ntohs(iphdr.tot_len);
 
-	if (event->l4_proto == IPPROTO_ICMP) {
+	    if (event->l4_proto == IPPROTO_ICMP) {
        	    proto_icmp_echo_request = ICMP_ECHO;
        	    proto_icmp_echo_reply   = ICMP_ECHOREPLY;
         }
-
     } else if (event->ip_version == 6) {
         // Assume no option header --> fixed size header
         struct ipv6hdr* ipv6hdr = (struct ipv6hdr*)l3_header_address;
