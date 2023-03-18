@@ -387,6 +387,8 @@ do_trace_skb(struct event_t *event, void *ctx, struct sk_buff *skb, void *netdev
     // if ((__BCC_ipaddr != event->saddr[0] || __BCC_ipaddr1 != event->saddr[1]) && 
     //     (__BCC_ipaddr != event->daddr[0] || __BCC_ipaddr1 != event->daddr[1]))
     //     return -1;
+    if (__BCC_ipaddr != event->saddr[0] && __BCC_ipaddr != event->daddr[0])
+        return -1;
 #else
     // ipv4
     if (event->ip_version == 6)
