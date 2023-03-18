@@ -237,9 +237,9 @@ def time_str(event):
             earliest_ts = event.start_ns
         return "%-7.6f " % ((event.start_ns - earliest_ts) / 1000000000.0)
     elif args.time:
-        return "%-7s " % time.strftime("%H:%M:%S")
+        return "%-14s " % time.strftime("%H:%M:%S.%f")
     else:
-        return "%-7s " % time.strftime("%H:%M:%S")
+        return "%-14s " % time.strftime("%H:%M:%S.%f")
 
 def event_printer(cpu, data, size):
     args.catch_count = args.catch_count - 1
