@@ -90,12 +90,12 @@ ipproto["icmp"]="1"
 proto = 0 if args.proto == None else (0 if ipproto.get(args.proto) == None else ipproto[args.proto])
 #ipaddr=socket.htonl(struct.unpack("I",socket.inet_aton("0" if args.ipaddr == None else args.ipaddr))[0])
 #port=socket.htons(args.port)
-ipaddr = (0, 0)
+ipaddr = [0, 0]
 if args.ipaddr != None:
     if args.ipaddr.find(":") >= 0:
         ipaddr = struct.unpack(">QQ", socket.inet_pton(socket.AF_INET6, args.ipaddr))
     else:
-        ipaddr = struct.unpack("I", socket.inet_pton(socket.AF_INET, args.ipaddr))
+        ipaddr[0] = struct.unpack("I", socket.inet_pton(socket.AF_INET, args.ipaddr))
 port=(args.port)
 icmpid=socket.htons(args.icmpid)
 
