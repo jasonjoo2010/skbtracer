@@ -9,7 +9,7 @@ import ctypes as ct
 import subprocess
 from struct import pack
 import argparse
-import time
+import datetime
 import struct
 
 examples = """examples:
@@ -237,9 +237,9 @@ def time_str(event):
             earliest_ts = event.start_ns
         return "%-7.6f " % ((event.start_ns - earliest_ts) / 1000000000.0)
     elif args.time:
-        return "%-14s " % time.strftime("%H:%M:%S.%f")
+        return "%-11s " % datetime.datetime.utcnow().strftime("%H:%M:%S.%f")[:-3]
     else:
-        return "%-14s " % time.strftime("%H:%M:%S.%f")
+        return "%-11s " % datetime.datetime.utcnow().strftime("%H:%M:%S.%f")[:-3]
 
 def event_printer(cpu, data, size):
     args.catch_count = args.catch_count - 1
