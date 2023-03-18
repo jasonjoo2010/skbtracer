@@ -443,6 +443,11 @@ int kprobe__netif_rx(struct pt_regs *ctx, struct sk_buff *skb)
     return do_trace(ctx, skb, __func__+8, NULL);
 }
 
+int kprobe__enqueue_to_backlog(struct pt_regs *ctx, struct sk_buff *skb, int cpu, unsigned int *qtail)
+{
+    return do_trace(ctx, skb, __func__+8, NULL);
+}
+
 int kprobe____netif_receive_skb(struct pt_regs *ctx, struct sk_buff *skb)
 {
     return do_trace(ctx, skb, __func__+8, NULL);
