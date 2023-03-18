@@ -93,7 +93,7 @@ proto = 0 if args.proto == None else (0 if ipproto.get(args.proto) == None else 
 ipaddr = [0, 0]
 if args.ipaddr != None:
     if args.ipaddr.find(":") >= 0:
-        ipaddr = struct.unpack(">QQ", socket.inet_pton(socket.AF_INET6, args.ipaddr))
+        ipaddr = struct.unpack("QQ", socket.inet_pton(socket.AF_INET6, args.ipaddr))
     else:
         ipaddr[0] = struct.unpack("I", socket.inet_pton(socket.AF_INET, args.ipaddr))
 port=(args.port)
