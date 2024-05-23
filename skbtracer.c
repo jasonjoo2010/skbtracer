@@ -98,6 +98,42 @@ struct ipt_do_table_args
 };
 BPF_HASH(cur_ipt_do_table_args, u32, struct ipt_do_table_args);
 
+enum br_pkt_type {
+	BR_PKT_UNICAST,
+	BR_PKT_MULTICAST,
+	BR_PKT_BROADCAST
+};
+
+#define container_of(ptr, type, member) ({				\
+	void *__mptr = (void *)(ptr);					\
+	((type *)(__mptr - offsetof(type, member))); })
+
+struct rtable {
+	struct dst_entry	dst;
+
+	int			rt_genid;
+	unsigned int		rt_flags;
+	__u16			rt_type;
+	__u8			rt_is_input;
+	__u8			rt_uses_gateway;
+
+	int			rt_iif;
+
+	u8			rt_gw_family;
+	/* Info on neighbour */
+	union {
+		__be32		rt_gw4;
+		struct in6_addr	rt_gw6;
+	};
+
+	/* Miscellaneous cached information */
+	u32			rt_mtu_locked:1,
+				rt_pmtu:31;
+
+	struct list_head	rt_uncached;
+	void			*rt_uncached_list;
+};
+
 union ___skb_pkt_type {
     __u8 value;
     struct {
@@ -109,6 +145,52 @@ union ___skb_pkt_type {
         __u8			nf_trace:1;
         __u8			ip_summed:2;
     };
+};
+
+struct fib_nh_common {
+	struct net_device	*nhc_dev;
+	int			nhc_oif;
+	unsigned char		nhc_scope;
+	u8			nhc_family;
+	u8			nhc_gw_family;
+	unsigned char		nhc_flags;
+	struct lwtunnel_state	*nhc_lwtstate;
+
+	union {
+		__be32          ipv4;
+		struct in6_addr ipv6;
+	} nhc_gw;
+
+	int			nhc_weight;
+	atomic_t		nhc_upper_bound;
+
+	/* v4 specific, but allows fib6_nh with v4 routes */
+	struct rtable __rcu * __percpu *nhc_pcpu_rth_output;
+	struct rtable __rcu     *nhc_rth_input;
+	struct fnhe_hash_bucket	__rcu *nhc_exceptions;
+};
+
+struct fib_table;
+struct fib_result {
+	__be32			prefix;
+	unsigned char		prefixlen;
+	unsigned char		nh_sel;
+	unsigned char		type;
+	unsigned char		scope;
+	u32			tclassid;
+	struct fib_nh_common	*nhc;
+	struct fib_info		*fi;
+	struct fib_table	*table;
+	struct hlist_head	*fa_head;
+};
+
+struct fib_table {
+	struct hlist_node	tb_hlist;
+	u32			tb_id;
+	int			tb_num_default;
+	struct rcu_head		rcu;
+	unsigned long 		*tb_data;
+	unsigned long		__data[];
 };
 
 #if __BCC_keep
@@ -419,8 +501,16 @@ do_trace_skb(struct event_t *event, void *ctx, struct sk_buff *skb, void *netdev
     return 0;
 }
 
+static void dump_rt(struct sk_buff *skb, const char *func_name) {
+   struct dst_entry *dst = (struct dst_entry *)(skb->_skb_refdst & SKB_DST_PTRMASK);
+   const struct rtable *rt = container_of(dst, struct rtable, dst);
+   //char buf[200] = {0};
+   //bpf_strncpy(buf, func_name, 199);
+   bpf_trace_printk("neigh: %d %u, %s", rt->rt_gw_family, rt->rt_gw4, func_name);
+}
+
 static int
-do_trace(void *ctx, struct sk_buff *skb, const char *func_name, void *netdev)
+do_trace(void *ctx, struct sk_buff *skb, const char *func_name, void *netdev, u8 *processed)
 {
     struct event_t event = {};
     union ___skb_pkt_type type = {};
@@ -434,8 +524,11 @@ do_trace(void *ctx, struct sk_buff *skb, const char *func_name, void *netdev)
 
     event.start_ns = bpf_ktime_get_ns();
     bpf_strncpy(event.func_name, func_name, FUNCNAME_MAX_LEN);
+    dump_rt(skb, event.func_name);
     CALL_STACK(ctx, &event);
     route_event.perf_submit(ctx, &event, sizeof(event));
+    if (processed)
+        *processed = 1;
 out:
     return 0;
 }
@@ -451,32 +544,32 @@ out:
  */
 int kprobe__netif_rx(struct pt_regs *ctx, struct sk_buff *skb)
 {
-    return do_trace(ctx, skb, __func__+8, NULL);
+    return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__enqueue_to_backlog(struct pt_regs *ctx, struct sk_buff *skb, int cpu, unsigned int *qtail)
 {
-    return do_trace(ctx, skb, __func__+8, NULL);
+    return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe____netif_receive_skb(struct pt_regs *ctx, struct sk_buff *skb)
 {
-    return do_trace(ctx, skb, __func__+8, NULL);
+    return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__tpacket_rcv(struct pt_regs *ctx, struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
-    return do_trace(ctx, skb, __func__+8, orig_dev);
+    return do_trace(ctx, skb, __func__+8, orig_dev, NULL);
 }
 
 int kprobe__packet_rcv(struct pt_regs *ctx, struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
-    return do_trace(ctx, skb, __func__+8, orig_dev);
+    return do_trace(ctx, skb, __func__+8, orig_dev, NULL);
 }
 
 int kprobe__napi_gro_receive(struct pt_regs *ctx, struct napi_struct *napi, struct sk_buff *skb)
 {
-    return do_trace(ctx, skb, __func__+8, NULL);
+    return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 /*
@@ -487,7 +580,7 @@ int kprobe__napi_gro_receive(struct pt_regs *ctx, struct napi_struct *napi, stru
 
 int kprobe____dev_queue_xmit(struct pt_regs *ctx, struct sk_buff *skb, struct net_device *sb_dev)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 /*
@@ -507,72 +600,192 @@ int kprobe____dev_queue_xmit(struct pt_regs *ctx, struct sk_buff *skb, struct ne
  */
 int kprobe__br_handle_frame(struct pt_regs *ctx, struct sk_buff **pskb)
 {
-   return do_trace(ctx, *pskb, __func__+8, NULL);
+   return do_trace(ctx, *pskb, __func__+8, NULL, NULL);
 }
 
 int kprobe__br_handle_frame_finish(struct pt_regs *ctx, struct net *net, struct sock *sk, struct sk_buff *skb)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__br_nf_pre_routing(struct pt_regs *ctx, void *priv, struct sk_buff *skb, const struct nf_hook_state *state)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__br_nf_pre_routing_finish(struct pt_regs *ctx, struct net *net, struct sock *sk, struct sk_buff *skb)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__br_nf_pre_routing_finish_bridge(struct pt_regs *ctx, struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__skb_push(struct pt_regs *ctx, struct sk_buff *skb, unsigned int len)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__br_nf_hook_thresh(struct pt_regs *ctx, unsigned int hook, struct net *net,
+		      struct sock *sk, struct sk_buff *skb,
+		      struct net_device *indev,
+		      struct net_device *outdev)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__ip_route_input_noref(struct pt_regs *ctx, struct sk_buff *skb, __be32 dst, __be32 src, u8 tos, struct net_device *devin) {
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__ip_route_input_slow(struct pt_regs *ctx, struct sk_buff *skb, __be32 daddr, __be32 saddr,
+			       u8 tos, struct net_device *dev,
+			       struct fib_result *res)
+{
+   u8 processed = 0;
+   int ret = do_trace(ctx, skb, __func__+8, NULL, &processed);
+   if (processed) {
+      struct fib_nh_common *nhc = (*res).nhc;
+      struct rtable *rt = nhc->nhc_rth_input;
+      bpf_trace_printk("route slow: => %u, %d %u", daddr, rt->rt_gw_family, rt->rt_gw4);
+   }
+   return ret;
+}
+
+BPF_HASH(fib_active_map, u32, struct fib_result *);
+
+int kprobe__fib_table_lookup(struct pt_regs *ctx, struct fib_table *tb, const struct flowi4 *flp, struct fib_result *res, int fib_flags)
+{
+   if (flp->saddr != 0x935e790a && flp->saddr != 0x6aea760a)
+      return 1;
+
+   u32 pid = bpf_get_current_pid_tgid();
+   fib_active_map.update(&pid, &res);
+   bpf_trace_printk("fib lookup from %u => %u", flp->saddr, flp->daddr);
+   bpf_trace_printk("fib lookup id=%d, iif=%d, ns=%d", tb->tb_id, flp->flowi4_iif, flp->flowi4_uid);
+   return 1;
+}
+
+int kretprobe__fib_table_lookup(struct pt_regs *ctx)
+{
+   u32 pid = bpf_get_current_pid_tgid();
+   struct fib_result **resp;
+   resp = fib_active_map.lookup(&pid);
+   if (!resp)
+      return 1;
+   bpf_trace_printk("fib lookup ret => %d", PT_REGS_RC(ctx));
+   struct fib_result res = **resp;
+   struct fib_nh_common *nhc = (**resp).nhc;
+   struct rtable *rt = nhc->nhc_rth_input;
+   struct fib_table *tb = res.table;
+   bpf_trace_printk("fib lookup res: family=%d gw4=%u scope=%d", rt->rt_gw_family, rt->rt_gw4, res.scope);
+   bpf_trace_printk("fib lookup res: prefix=%u type=%d", res.prefix, res.type);
+   fib_active_map.delete(&pid);
+   return 1;
+}
+
+int kprobe____mkroute_input(struct pt_regs *ctx, struct sk_buff *skb,
+			   const struct fib_result *res,
+			   struct in_device *in_dev,
+			   __be32 daddr, __be32 saddr, u32 tos)
+{
+   u8 processed = 0;
+   int ret = do_trace(ctx, skb, __func__+8, NULL, &processed);
+   if (processed) {
+      struct fib_nh_common *nhc = (*res).nhc;
+      struct rtable *rt = nhc->nhc_rth_input;
+      bpf_trace_printk("mkroute: => %u, %d %u", daddr, rt->rt_gw_family, rt->rt_gw4);
+   }
+   return ret;
+}
+
+
+int kprobe__nf_bridge_update_protocol(struct pt_regs *ctx, struct sk_buff *skb)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__ip_forward(struct pt_regs *ctx, struct sk_buff *skb)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__ip_handle_martian_source(struct pt_regs *ctx, struct net_device *dev,
+				     struct in_device *in_dev,
+				     struct sk_buff *skb,
+				     __be32 daddr,
+				     __be32 saddr)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__br_pass_frame_up(struct pt_regs *ctx, struct sk_buff *skb)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__br_netif_receive_skb(struct pt_regs *ctx, struct net *net, struct sock *sk, struct sk_buff *skb)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__br_forward(struct pt_regs *ctx, const void *to, struct sk_buff *skb, bool local_rcv, bool local_orig)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe____br_forward(struct pt_regs *ctx, const void *to, struct sk_buff *skb, bool local_orig)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
-int kprobe__deliver_clone(struct pt_regs *ctx, const void *prev, struct sk_buff *skb, bool local_orig)
+int kprobe__br_flood(struct pt_regs *ctx, struct net_bridge *br, struct sk_buff *skb, enum br_pkt_type pkt_type, bool local_rcv, bool local_orig)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
+
+int kprobe__br_dev_xmit(struct pt_regs *ctx, struct sk_buff *skb, struct net_device *dev)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__ipv4_neigh_lookup(struct pt_regs *ctx, const struct dst_entry *dst,
+					   struct sk_buff *skb,
+					   const void *daddr)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+/* int kprobe__deliver_clone(struct pt_regs *ctx, const void *prev, struct sk_buff *skb, bool local_orig)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}*/
 
 int kprobe__br_forward_finish(struct pt_regs *ctx, struct net *net, struct sock *sk, struct sk_buff *skb)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__br_nf_forward_ip(struct pt_regs *ctx, void *priv,struct sk_buff *skb,const struct nf_hook_state *state)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__br_nf_forward_finish(struct pt_regs *ctx, struct net *net, struct sock *sk, struct sk_buff *skb)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__br_nf_post_routing(struct pt_regs *ctx, void *priv,struct sk_buff *skb,const struct nf_hook_state *state)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__br_nf_dev_queue_xmit(struct pt_regs *ctx, struct net *net, struct sock *sk, struct sk_buff *skb)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 /*
@@ -587,22 +800,22 @@ int kprobe__br_nf_dev_queue_xmit(struct pt_regs *ctx, struct net *net, struct so
 
 int kprobe__ip_rcv(struct pt_regs *ctx, struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__ip_rcv_finish(struct pt_regs *ctx, struct net *net, struct sock *sk, struct sk_buff *skb)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__ip_output(struct pt_regs *ctx, struct net *net, struct sock *sk, struct sk_buff *skb)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 int kprobe__ip_finish_output(struct pt_regs *ctx, struct net *net, struct sock *sk, struct sk_buff *skb)
 {
-   return do_trace(ctx, skb, __func__+8, NULL);
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
 #endif
