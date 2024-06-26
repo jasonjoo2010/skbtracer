@@ -78,6 +78,7 @@ struct event_t {
     void *skb;
     // skb info
     u8 pkt_type; //skb->pkt_type
+//    unsigned long _nfct;
 
     // call stack
     int kernel_stack_id;
@@ -85,7 +86,7 @@ struct event_t {
 
     //time
     u64 start_ns;
-    u64 test;
+    u32 iptable_entry;
 };
 BPF_PERF_OUTPUT(route_event);
 
@@ -521,10 +522,12 @@ do_trace(void *ctx, struct sk_buff *skb, const char *func_name, void *netdev, u8
     event.skb=skb;
     bpf_probe_read(&type.value, 1, ((char*)skb) + offsetof(typeof(*skb), __pkt_type_offset));
     event.pkt_type = type.pkt_type;
+//event._nfct = skb->_nfct;
 
     event.start_ns = bpf_ktime_get_ns();
     bpf_strncpy(event.func_name, func_name, FUNCNAME_MAX_LEN);
     dump_rt(skb, event.func_name);
+    event.iptable_entry = skb->_nfct;
     CALL_STACK(ctx, &event);
     route_event.perf_submit(ctx, &event, sizeof(event));
     if (processed)
@@ -779,6 +782,51 @@ int kprobe__br_nf_forward_finish(struct pt_regs *ctx, struct net *net, struct so
 }
 
 int kprobe__br_nf_post_routing(struct pt_regs *ctx, void *priv,struct sk_buff *skb,const struct nf_hook_state *state)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__nf_hook_slow(struct pt_regs *ctx, struct sk_buff *skb, struct nf_hook_state *state,
+		 const struct nf_hook_entries *e, unsigned int s)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__nft_nat_do_chain(struct pt_regs *ctx, void *priv, struct sk_buff *skb,
+				     const struct nf_hook_state *state)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__resolve_normal_ct(struct pt_regs *ctx, struct nf_conn *tmpl,
+		  struct sk_buff *skb,
+		  unsigned int dataoff,
+		  u_int8_t protonum,
+		  const struct nf_hook_state *state)
+{
+    return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__nf_nat_ipv4_pre_routing(struct pt_regs *ctx, void *priv, struct sk_buff *skb,
+			const struct nf_hook_state *state)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__nf_nat_ipv4_out(struct pt_regs *ctx, void *priv, struct sk_buff *skb,
+		const struct nf_hook_state *state)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__nf_nat_ipv4_local_fn(struct pt_regs *ctx, void *priv, struct sk_buff *skb,
+		     const struct nf_hook_state *state)
+{
+   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__nf_nat_ipv4_local_in(struct pt_regs *ctx, void *priv, struct sk_buff *skb,
+		     const struct nf_hook_state *state)
 {
    return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }

@@ -193,12 +193,13 @@ class TestEvt(ct.Structure):
 
         ("skb",         ct.c_ulonglong),
         ("pkt_type",    ct.c_ubyte),
+#        ("_nfct",    ct.c_ulong),
 
 	("kernel_stack_id", ct.c_int),
 	("kernel_ip",   ct.c_ulonglong),
 
 	("start_ns",    ct.c_ulonglong),
-	("test",        ct.c_ulonglong)
+    ("iptable_entry",    ct.c_ulong),
     ]
 
 
@@ -292,7 +293,7 @@ def event_printer(cpu, data, size):
     trace_info = "%x.%u:%s%s" % (event.skb, event.pkt_type, iptables, event.func_name)
 
     # Print event
-    print("[%-8s][%-10s] %-6s %-18s %-12s %-6s %-40s %s" % (time_str(event), event.netns, event.cpu, event.ifname, mac_info, event.tot_len, pkt_info, trace_info))
+    print("[%-8s][%-10s] %-6s %-18s %-12s %-6s %-40s %s %s" % (time_str(event), event.netns, event.cpu, event.ifname, mac_info, event.tot_len, pkt_info, trace_info, event.iptable_entry))
     print_stack(event)
 
 is_done = False
@@ -301,7 +302,7 @@ if __name__ == "__main__":
     b = BPF(text=bpf_text)
     b["route_event"].open_perf_buffer(event_printer)
 
-    print("%-10s %-12s %-6s %-18s %-12s %-6s %-40s %s" % ('time', 'NETWORK_NS', 'CPU', 'INTERFACE', 'DEST_MAC', 'IP_LEN', 'PKT_INFO', 'TRACE_INFO'))
+    print("%-10s %-12s %-6s %-18s %-12s %-6s %-40s %s %s" % ('time', 'NETWORK_NS', 'CPU', 'INTERFACE', 'DEST_MAC', 'IP_LEN', 'PKT_INFO', 'TRACE_INFO', 'CONNTRACK'))
 
     try:
         while is_done == False:
