@@ -194,6 +194,14 @@ struct fib_table {
 	unsigned long		__data[];
 };
 
+struct net_bridge_port {
+	struct net_bridge		*br;
+	struct net_device		*dev;
+	struct list_head		list;
+
+	unsigned long			flags;
+};
+
 #if __BCC_keep
 #endif
 
@@ -734,9 +742,14 @@ int kprobe__br_netif_receive_skb(struct pt_regs *ctx, struct net *net, struct so
    return do_trace(ctx, skb, __func__+8, NULL, NULL);
 }
 
-int kprobe__br_forward(struct pt_regs *ctx, const void *to, struct sk_buff *skb, bool local_rcv, bool local_orig)
+int kprobe__br_forward(struct pt_regs *ctx, const struct net_bridge_port *to, struct sk_buff *skb, bool local_rcv, bool local_orig)
 {
-   return do_trace(ctx, skb, __func__+8, NULL, NULL);
+    u8 processed = 0;
+    int ret = do_trace(ctx, skb, __func__+8, NULL, &processed);
+    if (processed) {
+        bpf_trace_printk("br_forward: => %s", to->dev->name);
+    }
+    return ret;
 }
 
 int kprobe____br_forward(struct pt_regs *ctx, const void *to, struct sk_buff *skb, bool local_orig)
