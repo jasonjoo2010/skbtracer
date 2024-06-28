@@ -87,6 +87,7 @@ struct event_t {
     //time
     u64 start_ns;
     u32 iptable_entry;
+    u16 vlan_tci;
 };
 BPF_PERF_OUTPUT(route_event);
 
@@ -536,6 +537,8 @@ do_trace(void *ctx, struct sk_buff *skb, const char *func_name, void *netdev, u8
     bpf_strncpy(event.func_name, func_name, FUNCNAME_MAX_LEN);
     dump_rt(skb, event.func_name);
     event.iptable_entry = skb->_nfct;
+    event.vlan_tci = skb->vlan_tci;
+    // bpf_trace_printk("vlan: %u", event.vlan_tci);
     CALL_STACK(ctx, &event);
     route_event.perf_submit(ctx, &event, sizeof(event));
     if (processed)

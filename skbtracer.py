@@ -193,13 +193,13 @@ class TestEvt(ct.Structure):
 
         ("skb",         ct.c_ulonglong),
         ("pkt_type",    ct.c_ubyte),
-#        ("_nfct",    ct.c_ulong),
 
 	("kernel_stack_id", ct.c_int),
 	("kernel_ip",   ct.c_ulonglong),
 
 	("start_ns",    ct.c_ulonglong),
-    ("iptable_entry",    ct.c_ulong),
+    ("iptable_entry",    ct.c_int),
+    ("vlan_tci",    ct.c_ushort),
     ]
 
 
@@ -283,6 +283,9 @@ def event_printer(cpu, data, size):
             pkt_info = "I:%s->%s" % (saddr, daddr)
     else:
         pkt_info = "%u:%s->%s" % (event.l4_proto, saddr, daddr)
+    
+    if event.vlan_tci != 0:
+        pkt_info = "%s(%u)" % (pkt_info, event.vlan_tci)
 
     iptables = ""
     if event.flags & ROUTE_EVENT_IPTABLE == ROUTE_EVENT_IPTABLE:
