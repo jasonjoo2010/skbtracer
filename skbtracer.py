@@ -172,6 +172,7 @@ class TestEvt(ct.Structure):
         ("ifname",      ct.c_char * IFNAMSIZ),
         ("netns",       ct.c_uint),
 
+        ("src_mac",    ct.c_ubyte * 6),
         ("dest_mac",    ct.c_ubyte * 6),
         ("len",         ct.c_uint),
         ("ip_version",  ct.c_ubyte),
@@ -188,7 +189,6 @@ class TestEvt(ct.Structure):
         ("hook",        ct.c_uint),
         ("pf",          ct.c_ubyte),
         ("verdict",     ct.c_uint),
-        ("tablename",   ct.c_char * XT_TABLE_MAXNAMELEN),
         ("ipt_delay",   ct.c_ulonglong),
 
         ("skb",         ct.c_ulonglong),
@@ -268,7 +268,8 @@ def event_printer(cpu, data, size):
     else:
         return
 
-    mac_info = ''.join('%02x' % b for b in event.dest_mac)
+    smac_info = ''.join('%02x' % b for b in event.src_mac)
+    dmac_info = ''.join('%02x' % b for b in event.dest_mac)
 
     if event.l4_proto == socket.IPPROTO_TCP:
         pkt_info = "T_%s:%s:%u->%s:%u" % (_get_tcpflags(event.tcpflags), saddr, event.sport, daddr, event.dport)
@@ -291,12 +292,12 @@ def event_printer(cpu, data, size):
     if event.flags & ROUTE_EVENT_IPTABLE == ROUTE_EVENT_IPTABLE:
         verdict = _get(NF_VERDICT_NAME, event.verdict, "~UNK~")
         hook = _get(HOOKNAMES, event.hook, "~UNK~")
-        iptables = "%u.%s.%s.%s " % (event.pf, event.tablename, hook, verdict)
+        iptables = "%u.%s.%s.%s " % (event.pf, "", hook, verdict)
 
     trace_info = "%x.%u:%s%s" % (event.skb, event.pkt_type, iptables, event.func_name)
 
     # Print event
-    print("[%-8s][%-10s] %-6s %-18s %-12s %-6s %-40s %s %s" % (time_str(event), event.netns, event.cpu, event.ifname, mac_info, event.tot_len, pkt_info, trace_info, event.iptable_entry))
+    print("[%-8s][%-10s] %-6s %-18s %-12s %-12s %-6s %-40s %s %s" % (time_str(event), event.netns, event.cpu, event.ifname, smac_info, dmac_info, event.tot_len, pkt_info, trace_info, event.iptable_entry))
     print_stack(event)
 
 is_done = False
@@ -305,7 +306,7 @@ if __name__ == "__main__":
     b = BPF(text=bpf_text)
     b["route_event"].open_perf_buffer(event_printer)
 
-    print("%-10s %-12s %-6s %-18s %-12s %-6s %-40s %s %s" % ('time', 'NETWORK_NS', 'CPU', 'INTERFACE', 'DEST_MAC', 'IP_LEN', 'PKT_INFO', 'TRACE_INFO', 'CONNTRACK'))
+    print("%-10s %-12s %-6s %-18s %-12s %-12s %-6s %-40s %s %s" % ('time', 'NETWORK_NS', 'CPU', 'INTERFACE', 'SRC_MAC', 'DEST_MAC', 'IP_LEN', 'PKT_INFO', 'TRACE_INFO', 'CONNTRACK'))
 
     try:
         while is_done == False:

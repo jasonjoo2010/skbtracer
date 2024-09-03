@@ -54,6 +54,7 @@ struct event_t {
     u32  netns;
 
     // pkt info
+    u8 src_mac[6];
     u8 dest_mac[6];
     u32 len;
     u8 ip_version;
@@ -72,9 +73,7 @@ struct event_t {
     u32 hook;
     u8 pf;
     u32 verdict;
-    char tablename[XT_TABLE_MAXNAMELEN];
     u64 ipt_delay;
-
     void *skb;
     // skb info
     u8 pkt_type; //skb->pkt_type
@@ -250,6 +249,21 @@ static void bpf_strncpy(char *dst, const char *src, int n)
 #undef CPY
 }
 
+struct vxlan_dev_node {
+	struct hlist_node hlist;
+	struct vxlan_dev *vxlan;
+};
+
+struct vxlan_dev {
+	struct vxlan_dev_node hlist4;	/* vni hash table for IPv4 socket */
+	struct vxlan_dev_node hlist6;	/* vni hash table for IPv6 socket */
+	struct list_head  next;		/* vxlan's per namespace list */
+	void *vn4_sock;	/* listening socket for IPv4 */
+	void *vn6_sock;	/* listening socket for IPv6 */
+	struct net_device *dev;
+	struct net	  *net;		/* netns for packet i/o */
+};
+
 #define TCP_FLAGS_INIT(new_flags, orig_flags, flag) \
     do { \
         if (orig_flags & flag) { \
@@ -379,6 +393,7 @@ do_trace_skb(struct event_t *event, void *ctx, struct sk_buff *skb, void *netdev
     }
 
     l2_header_address = mac_header + head;
+    bpf_probe_read(&event->src_mac, 6, l2_header_address + 6);
     bpf_probe_read(&event->dest_mac, 6, l2_header_address);
 
     l3_header_address = head + network_header;
@@ -923,7 +938,6 @@ __ipt_do_table_out(struct pt_regs * ctx, struct sk_buff *skb)
     event.ipt_delay = bpf_ktime_get_ns() - args->start_ns;
     member_read(&event.hook, args->state, hook);
     member_read(&event.pf, args->state, pf);
-    member_read(&event.tablename, args->table, name);
     event.verdict = PT_REGS_RC(ctx);
     event.skb=args->skb;
     bpf_probe_read(&type.value, 1, ((char*)args->skb) + offsetof(typeof(*args->skb), __pkt_type_offset));
@@ -951,6 +965,97 @@ int kretprobe__ipt_do_table(struct pt_regs *ctx)
 }
 #endif
 
+int kprobe__vxlan_rcv(struct pt_regs *ctx, struct sock *sk, struct sk_buff *skb)
+{
+    return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe____iptunnel_pull_header(struct pt_regs *ctx, struct sk_buff *skb, int hdr_len,
+			   __be16 inner_proto, bool raw_proto, bool xnet)
+{
+    return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__udp_tun_rx_dst(struct pt_regs *ctx, struct sk_buff *skb,  unsigned short family,
+				    __be16 flags, __be64 tunnel_id, int md_size)
+{
+    return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__gro_cells_receive(struct pt_regs *ctx, struct gro_cells *gcells, struct sk_buff *skb)
+{
+    return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+BPF_HASH(set_mac_active_map, u32, struct sk_buff *);
+int kprobe__vxlan_set_mac(struct pt_regs *ctx, struct vxlan_dev *vxlan,
+			  struct vxlan_sock *vs,
+			  struct sk_buff *skb, __be32 vni)
+{
+    u8 processed = 0;
+    int ret = do_trace(ctx, skb, __func__+8, NULL, &processed);
+    if (processed)
+    {
+	bpf_trace_printk("set_mac: %08x%04x", *(u32 *)vxlan->dev->dev_addr, *(u16 *)(vxlan->dev->dev_addr+4));
+	u32 pid = bpf_get_current_pid_tgid();
+        set_mac_active_map.update(&pid, &skb);
+    }
+    return ret;
+}
+
+int kretprobe__vxlan_set_mac(struct pt_regs *ctx)
+{
+    u32 pid = bpf_get_current_pid_tgid();
+    struct sk_buff **pskb;
+    pskb = set_mac_active_map.lookup(&pid);
+    if (!pskb)
+        return 1;
+    struct sk_buff *skb = *pskb;
+    set_mac_active_map.delete(&pid);
+    bool ret = PT_REGS_RC(ctx);
+    bpf_trace_printk("vxlan_set_mac: %i", ret);
+    do_trace(ctx, skb, __func__+8, NULL, NULL);
+    return 1;
+}
+
+int kprobe__vxlan_ecn_decapsulate(struct pt_regs *ctx, struct vxlan_sock *vs, void *oiph,
+				  struct sk_buff *skb)
+{
+    return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__eth_type_trans(struct pt_regs *ctx, struct sk_buff *skb, struct net_device *dev)
+{
+    return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+int kprobe__vxlan_snoop(struct pt_regs *ctx, struct net_device *dev,
+			union vxlan_addr *src_ip, const u8 *src_mac,
+			u32 src_ifindex, __be32 vni)
+{
+    u32 pid = bpf_get_current_pid_tgid();
+    struct sk_buff **pskb;
+    pskb = set_mac_active_map.lookup(&pid);
+    if (!pskb)
+        return 1;
+    struct sk_buff *skb = *pskb;
+    return do_trace(ctx, skb, __func__+8, NULL, NULL);
+}
+
+
+int kretprobe__vxlan_snoop(struct pt_regs *ctx)
+{
+    u32 pid = bpf_get_current_pid_tgid();
+    struct sk_buff **pskb;
+    pskb = set_mac_active_map.lookup(&pid);
+    if (!pskb)
+        return 1;
+    struct sk_buff *skb = *pskb;
+    bool ret = PT_REGS_RC(ctx);
+    do_trace(ctx, skb, __func__+8, NULL, NULL);
+    bpf_trace_printk("vxlan_snoop: %i", ret);
+    return 1;
+}
 
 #if __BCC_dropstack
 int kprobe____kfree_skb(struct pt_regs *ctx, struct sk_buff *skb)
@@ -968,7 +1073,6 @@ int kprobe____kfree_skb(struct pt_regs *ctx, struct sk_buff *skb)
     return 0;
 }
 #endif
-
 #if 0
 int kprobe__ip6t_do_table(struct pt_regs *ctx, struct sk_buff *skb, const struct nf_hook_state *state, struct xt_table *table)
 {
